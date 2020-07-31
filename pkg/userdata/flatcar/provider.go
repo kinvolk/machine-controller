@@ -227,38 +227,37 @@ systemd:
         MemoryAccounting=true
         EnvironmentFile=-/etc/environment
         EnvironmentFile=/etc/kubernetes/nodeip.conf
-{{- if .HTTPProxy }}
-        Environment=KUBELET_IMAGE=docker://{{ .HyperkubeImage }}:v{{ .KubeletVersion }}
-{{- else }}
-        Environment=KUBELET_IMAGE=docker://k8s.gcr.io/hyperkube-amd64:v{{ .KubeletVersion }}
-{{- end }}
-        Environment="RKT_RUN_ARGS=--uuid-file-save=/var/cache/kubelet-pod.uuid \
-          --inherit-env \
-          --insecure-options=image{{if .InsecureHyperkubeImage }},http{{ end }} \
-          --volume=resolv,kind=host,source=/etc/resolv.conf \
-          --mount volume=resolv,target=/etc/resolv.conf \
-          --volume cni-bin,kind=host,source=/opt/cni/bin \
-          --mount volume=cni-bin,target=/opt/cni/bin \
-          --volume cni-conf,kind=host,source=/etc/cni/net.d \
-          --mount volume=cni-conf,target=/etc/cni/net.d \
-          --volume etc-kubernetes,kind=host,source=/etc/kubernetes \
-          --mount volume=etc-kubernetes,target=/etc/kubernetes \
-          --volume var-log,kind=host,source=/var/log \
-          --mount volume=var-log,target=/var/log \
-          --volume var-lib-calico,kind=host,source=/var/lib/calico \
-          --mount volume=var-lib-calico,target=/var/lib/calico"
         ExecStartPre=/bin/bash /opt/bin/setup_net_env.sh
         ExecStartPre=/bin/mkdir -p /var/lib/calico
         ExecStartPre=/bin/mkdir -p /etc/kubernetes/manifests
         ExecStartPre=/bin/mkdir -p /etc/cni/net.d
         ExecStartPre=/bin/mkdir -p /opt/cni/bin
-        ExecStartPre=-/usr/bin/rkt rm --uuid-file=/var/cache/kubelet-pod.uuid
-        ExecStartPre=-/bin/rm -rf /var/lib/rkt/cas/tmp/
         ExecStartPre=/bin/bash /opt/load-kernel-modules.sh
-        ExecStart=/usr/lib/flatcar/kubelet-wrapper \
-{{ if semverCompare ">=1.17.0" .KubeletVersion }}{{ print "          kubelet \\\n" }}{{ end -}}
+        ExecStartPre=/usr/bin/env > /tmp/environment
+        ExecStart=/usr/bin/docker run --name %n \
+            --rm --tty --restart no \
+            --network host \
+            --env-file /tmp/environment \
+            -v /dev:/dev \
+            -v /etc/cni/net.d:/etc/cni/net.d \
+            -v /etc/kubernetes:/etc/kubernetes \
+            -v /etc/machine-id:/etc/machine-id:ro \
+            -v /etc/os-release:/etc/os-release:ro \
+            -v /etc/resolv.conf:/etc/resolv.conf:ro \
+            -v /lib/modules:/lib/modules \
+            -v /mnt:/mnt:rshared \
+            -v /opt/cni/bin:/opt/cni/bin:ro \
+            -v /run:/run \
+            -v /sys:/sys \
+            -v /usr/sbin/iscsiadm:/usr/sbin/iscsiadm \
+            -v /var/lib/calico:/var/lib/calico:ro \
+            -v /var/lib/cni:/var/lib/cni \
+            -v /var/lib/docker:/var/lib/docker \
+            -v /var/lib/kubelet:/var/lib/kubelet:rshared \
+            -v /var/log/pods:/var/log/pods \
+            quay.io/poseidon/kubelet:v{{ .KubeletVersion }} \
 {{ kubeletFlags .KubeletVersion .CloudProviderName .MachineSpec.Name .DNSIPs .ExternalCloudProvider .PauseImage .MachineSpec.Taints | indent 10 }}
-        ExecStop=-/usr/bin/rkt stop --uuid-file=/var/cache/kubelet-pod.uuid
+        ExecStop=-/usr/bin/docker stop %n
         Restart=always
         RestartSec=10
         [Install]
